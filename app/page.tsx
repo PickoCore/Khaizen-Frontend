@@ -38,13 +38,14 @@ export default function Home() {
   const [downloadFilename, setDownloadFilename] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null); // ✅ FIX
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
+    if (e.type === 'dragenter' || e.type === 'dragover') {
       setDragActive(true);
-    } else if (e.type === "dragleave") {
+    } else if (e.type === 'dragleave') {
       setDragActive(false);
     }
   }, []);
@@ -53,12 +54,12 @@ export default function Home() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    
+
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const droppedFile = e.dataTransfer.files[0];
       const ext = droppedFile.name.split('.').pop()?.toLowerCase();
       const supportedFormats = ['zip', 'rar', '7z', 'tar', 'gz'];
-      
+
       if (ext && supportedFormats.includes(ext)) {
         setFile(droppedFile);
         setError(null);
@@ -73,7 +74,7 @@ export default function Home() {
       const selectedFile = e.target.files[0];
       const ext = selectedFile.name.split('.').pop()?.toLowerCase();
       const supportedFormats = ['zip', 'rar', '7z', 'tar', 'gz'];
-      
+
       if (ext && supportedFormats.includes(ext)) {
         setFile(selectedFile);
         setError(null);
@@ -102,6 +103,7 @@ export default function Home() {
     setStats(null);
     setDownloadBlob(null);
     setDownloadFilename('');
+    setDownloadUrl(null);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -125,7 +127,6 @@ export default function Home() {
         throw new Error(errorData.detail || 'Optimization failed');
       }
 
-      // Extract stats from headers
       const headers = response.headers;
       const fileTypesStr = headers.get('X-File-Types');
       const fileTypes = fileTypesStr ? JSON.parse(fileTypesStr) : {};
@@ -138,26 +139,25 @@ export default function Home() {
         optimizedFiles: parseInt(headers.get('X-Optimized-Files') || '0'),
         bytesSaved: parseInt(headers.get('X-Bytes-Saved') || '0'),
         actualBytesSaved: parseInt(headers.get('X-Actual-Bytes-Saved') || '0'),
-        fileTypes: fileTypes
+        fileTypes: fileTypes,
       };
 
       setStats(optimizationStats);
 
-      // Get filename from Content-Disposition header
       const contentDisposition = headers.get('Content-Disposition');
       let filename = 'optimized_pack.zip';
       if (contentDisposition) {
         const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
-        if (filenameMatch) {
-          filename = filenameMatch[1];
-        }
+        if (filenameMatch) filename = filenameMatch[1];
       }
       setDownloadFilename(filename);
 
-      // Store blob for download
       const blob = await response.blob();
       setDownloadBlob(blob);
 
+      // ✅ FIX — generate and store download URL
+      const url = window.URL.createObjectURL(blob);
+      setDownloadUrl(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
@@ -166,15 +166,14 @@ export default function Home() {
   };
 
   const handleDownload = () => {
-    if (downloadBlob && downloadFilename) {
-      const url = window.URL.createObjectURL(downloadBlob);
+    if (downloadUrl && downloadFilename) {
       const a = document.createElement('a');
-      a.href = url;
+      a.href = downloadUrl;
       a.download = downloadFilename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      window.URL.revokeObjectURL(downloadUrl);
     }
   };
 
@@ -184,30 +183,133 @@ export default function Home() {
     setDownloadBlob(null);
     setDownloadFilename('');
     setError(null);
+    setDownloadUrl(null);
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-      <div className="container mx-auto px-4 py-12 max-w-5xl">
-        {/* Header */}
-        <div className="text-center mb-12">
-          <div className="flex items-center justify-center mb-4">
-            <Zap className="w-12 h-12 text-emerald-600" />
-          </div>
-          <h1 className="text-5xl font-bold text-gray-900 mb-4">
-            Minecraft Texture Pack Optimizer
+    <main className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex flex-col items-center justify-center p-6">
+      <div className="bg-white/80 backdrop-blur-lg shadow-2xl rounded-2xl p-8 w-full max-w-3xl transition-all duration-300 border border-emerald-100">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-extrabold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
+            Minecraft Pack Optimizer
           </h1>
-          <p className="text-gray-600 text-lg mb-2">
-            Optimize your texture packs for better performance and smaller file sizes
-          </p>
-          <p className="text-sm text-gray-500">
-            Supports: PNG, JSON, OGG, Shaders • Archive formats: ZIP, RAR, 7Z
+          <p className="text-gray-600 mt-2">
+            Compress and optimize your Minecraft resource packs effortlessly.
           </p>
         </div>
 
-        {/* Upload Section, Options, Error, Buttons, and Results */}
-        {/* (same as your original — no changes besides bug fix) */}
+        <div
+          onDragEnter={handleDrag}
+          onDragLeave={handleDrag}
+          onDragOver={handleDrag}
+          onDrop={handleDrop}
+          className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
+            dragActive
+              ? 'border-emerald-500 bg-emerald-50'
+              : 'border-gray-300 hover:border-emerald-400'
+          }`}
+        >
+          <input type="file" accept=".zip,.rar,.7z,.tar,.gz" onChange={handleFileChange} className="hidden" id="file-upload" />
+          <label htmlFor="file-upload" className="flex flex-col items-center justify-center space-y-3">
+            <Upload className="w-12 h-12 text-emerald-500" />
+            <span className="text-gray-700">
+              {file ? (
+                <span className="font-medium text-emerald-600">{file.name}</span>
+              ) : (
+                <>
+                  Drag & drop your archive here, or <span className="text-emerald-600 underline">browse</span>
+                </>
+              )}
+            </span>
+          </label>
+        </div>
 
+        {error && <p className="text-red-500 text-sm mt-3 text-center">{error}</p>}
+
+        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Image Quality (%)</label>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={quality}
+              onChange={(e) => setQuality(parseInt(e.target.value))}
+              className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Max Image Size (px)</label>
+            <input
+              type="number"
+              placeholder="Optional"
+              value={maxSize}
+              onChange={(e) => setMaxSize(e.target.value)}
+              className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        </div>
+
+        <div className="flex justify-center mt-8 space-x-4">
+          <button
+            onClick={handleOptimize}
+            disabled={isProcessing || !file}
+            className={`flex items-center space-x-2 px-6 py-3 rounded-xl text-white transition-all ${
+              isProcessing || !file
+                ? 'bg-emerald-300 cursor-not-allowed'
+                : 'bg-emerald-500 hover:bg-emerald-600'
+            }`}
+          >
+            <Zap className="w-5 h-5" />
+            <span>{isProcessing ? 'Optimizing...' : 'Optimize Pack'}</span>
+          </button>
+          <button onClick={resetForm} className="text-gray-600 hover:text-gray-900 transition-colors">
+            Reset
+          </button>
+        </div>
+
+        {stats && (
+          <div className="mt-10 bg-emerald-50 border border-emerald-100 rounded-xl p-6">
+            <h2 className="text-lg font-bold text-emerald-700 mb-3 flex items-center">
+              <CheckCircle className="w-5 h-5 mr-2 text-emerald-500" />
+              Optimization Summary
+            </h2>
+            <ul className="text-gray-700 space-y-1">
+              <li>Original Size: <strong>{formatBytes(stats.originalSize)}</strong></li>
+              <li>Optimized Size: <strong>{formatBytes(stats.optimizedSize)}</strong></li>
+              <li>Files Optimized: <strong>{stats.optimizedFiles}/{stats.totalFiles}</strong></li>
+              <li>Bytes Saved: <strong>{formatBytes(stats.actualBytesSaved)}</strong></li>
+            </ul>
+
+            <div className="mt-5 flex flex-wrap gap-3">
+              {Object.entries(stats.fileTypes).map(([type, info]) => (
+                <div
+                  key={type}
+                  className="flex items-center bg-white border rounded-lg px-4 py-2 shadow-sm text-sm text-gray-700"
+                >
+                  {type === 'png' && <ImageIcon className="w-4 h-4 mr-2 text-emerald-500" />}
+                  {type === 'json' && <FileJson className="w-4 h-4 mr-2 text-emerald-500" />}
+                  {type === 'ogg' && <Music className="w-4 h-4 mr-2 text-emerald-500" />}
+                  {type === 'shader' && <Code className="w-4 h-4 mr-2 text-emerald-500" />}
+                  {type === 'other' && <FileArchive className="w-4 h-4 mr-2 text-emerald-500" />}
+                  <span className="capitalize">{type}</span>: {info.count}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {downloadBlob && (
+          <div className="mt-8 text-center">
+            <button
+              onClick={handleDownload}
+              className="inline-flex items-center space-x-2 bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-md transition-all"
+            >
+              <Download className="w-5 h-5" />
+              <span>Download Optimized Pack</span>
+            </button>
+          </div>
+        )}
       </div>
     </main>
   );
