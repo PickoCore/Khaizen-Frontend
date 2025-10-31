@@ -38,14 +38,13 @@ export default function Home() {
   const [downloadFilename, setDownloadFilename] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState<string | null>(null); // ✅ FIX
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
+    if (e.type === "dragenter" || e.type === "dragover") {
       setDragActive(true);
-    } else if (e.type === 'dragleave') {
+    } else if (e.type === "dragleave") {
       setDragActive(false);
     }
   }, []);
@@ -54,12 +53,12 @@ export default function Home() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-
+    
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const droppedFile = e.dataTransfer.files[0];
       const ext = droppedFile.name.split('.').pop()?.toLowerCase();
       const supportedFormats = ['zip', 'rar', '7z', 'tar', 'gz'];
-
+      
       if (ext && supportedFormats.includes(ext)) {
         setFile(droppedFile);
         setError(null);
@@ -74,7 +73,7 @@ export default function Home() {
       const selectedFile = e.target.files[0];
       const ext = selectedFile.name.split('.').pop()?.toLowerCase();
       const supportedFormats = ['zip', 'rar', '7z', 'tar', 'gz'];
-
+      
       if (ext && supportedFormats.includes(ext)) {
         setFile(selectedFile);
         setError(null);
@@ -103,7 +102,6 @@ export default function Home() {
     setStats(null);
     setDownloadBlob(null);
     setDownloadFilename('');
-    setDownloadUrl(null);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -117,16 +115,30 @@ export default function Home() {
     }
 
     try {
+      // Extended timeout for large files (5 minutes)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000);
+
       const response = await fetch(`${API_URL}/optimize?${params}`, {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Optimization failed');
+        let errorMessage = 'Optimization failed';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          errorMessage = `Server error: ${response.status}`;
+        }
+        throw new Error(errorMessage);
       }
 
+      // Extract stats from headers
       const headers = response.headers;
       const fileTypesStr = headers.get('X-File-Types');
       const fileTypes = fileTypesStr ? JSON.parse(fileTypesStr) : {};
@@ -139,41 +151,58 @@ export default function Home() {
         optimizedFiles: parseInt(headers.get('X-Optimized-Files') || '0'),
         bytesSaved: parseInt(headers.get('X-Bytes-Saved') || '0'),
         actualBytesSaved: parseInt(headers.get('X-Actual-Bytes-Saved') || '0'),
-        fileTypes: fileTypes,
+        fileTypes: fileTypes
       };
 
       setStats(optimizationStats);
 
+      // Get filename from Content-Disposition header
       const contentDisposition = headers.get('Content-Disposition');
       let filename = 'optimized_pack.zip';
       if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
-        if (filenameMatch) filename = filenameMatch[1];
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1].replace(/['"]/g, '');
+        }
       }
       setDownloadFilename(filename);
 
+      // Store blob for download
       const blob = await response.blob();
+      
+      // Verify blob has content
+      if (blob.size === 0) {
+        throw new Error('Downloaded file is empty');
+      }
+      
       setDownloadBlob(blob);
 
-      // ✅ FIX — generate and store download URL
-      const url = window.URL.createObjectURL(blob);
-      setDownloadUrl(url);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          setError('Request timeout - file is too large or server is busy. Please try again.');
+        } else {
+          setError(err.message);
+        }
+      } else {
+        setError('An unexpected error occurred');
+      }
+      console.error('Optimization error:', err);
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleDownload = () => {
-    if (downloadUrl && downloadFilename) {
+    if (downloadBlob && downloadFilename) {
+      const url = window.URL.createObjectURL(downloadBlob);
       const a = document.createElement('a');
-      a.href = downloadUrl;
+      a.href = url;
       a.download = downloadFilename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(downloadUrl);
+      window.URL.revokeObjectURL(url);
     }
   };
 
@@ -183,133 +212,311 @@ export default function Home() {
     setDownloadBlob(null);
     setDownloadFilename('');
     setError(null);
-    setDownloadUrl(null);
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 flex flex-col items-center justify-center p-6">
-      <div className="bg-white/80 backdrop-blur-lg shadow-2xl rounded-2xl p-8 w-full max-w-3xl transition-all duration-300 border border-emerald-100">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-extrabold bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
-            Minecraft Pack Optimizer
+    <main className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
+      <div className="container mx-auto px-4 py-12 max-w-5xl">
+        {/* Header */}
+        <div className="text-center mb-12">
+          <div className="flex items-center justify-center mb-4">
+            <Zap className="w-12 h-12 text-emerald-600" />
+          </div>
+          <h1 className="text-5xl font-bold text-gray-900 mb-4">
+            Minecraft Texture Pack Optimizer
           </h1>
-          <p className="text-gray-600 mt-2">
-            Compress and optimize your Minecraft resource packs effortlessly.
+          <p className="text-gray-600 text-lg mb-2">
+            Optimize your texture packs for better performance and smaller file sizes
+          </p>
+          <p className="text-sm text-gray-500">
+            Supports: PNG, JSON, OGG, Shaders • Archive formats: ZIP, RAR, 7Z
           </p>
         </div>
 
-        <div
-          onDragEnter={handleDrag}
-          onDragLeave={handleDrag}
-          onDragOver={handleDrag}
-          onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-xl p-8 text-center transition-all cursor-pointer ${
-            dragActive
-              ? 'border-emerald-500 bg-emerald-50'
-              : 'border-gray-300 hover:border-emerald-400'
-          }`}
-        >
-          <input type="file" accept=".zip,.rar,.7z,.tar,.gz" onChange={handleFileChange} className="hidden" id="file-upload" />
-          <label htmlFor="file-upload" className="flex flex-col items-center justify-center space-y-3">
-            <Upload className="w-12 h-12 text-emerald-500" />
-            <span className="text-gray-700">
-              {file ? (
-                <span className="font-medium text-emerald-600">{file.name}</span>
-              ) : (
-                <>
-                  Drag & drop your archive here, or <span className="text-emerald-600 underline">browse</span>
-                </>
-              )}
-            </span>
-          </label>
-        </div>
-
-        {error && <p className="text-red-500 text-sm mt-3 text-center">{error}</p>}
-
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Image Quality (%)</label>
+        {/* Main Card */}
+        <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
+          {/* Upload Area */}
+          <div
+            className={`border-2 border-dashed rounded-xl p-12 text-center transition-all ${
+              dragActive
+                ? 'border-emerald-500 bg-emerald-50'
+                : 'border-gray-300 hover:border-emerald-400'
+            }`}
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+          >
+            <Upload className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-700 mb-2">
+              {file ? file.name : 'Drop your texture pack here'}
+            </h3>
+            <p className="text-gray-500 mb-4">ZIP, RAR, 7Z, TAR, or GZ files</p>
             <input
-              type="number"
-              min="1"
-              max="100"
-              value={quality}
-              onChange={(e) => setQuality(parseInt(e.target.value))}
-              className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              type="file"
+              accept=".zip,.rar,.7z,.tar,.gz"
+              onChange={handleFileChange}
+              className="hidden"
+              id="file-upload"
             />
+            <label
+              htmlFor="file-upload"
+              className="inline-block px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 cursor-pointer transition-colors"
+            >
+              Select Archive File
+            </label>
+            {file && (
+              <p className="mt-4 text-sm text-gray-600">
+                Size: {formatBytes(file.size)}
+              </p>
+            )}
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Max Image Size (px)</label>
-            <input
-              type="number"
-              placeholder="Optional"
-              value={maxSize}
-              onChange={(e) => setMaxSize(e.target.value)}
-              className="mt-1 w-full border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-        </div>
 
-        <div className="flex justify-center mt-8 space-x-4">
+          {/* Options */}
+          <div className="grid md:grid-cols-2 gap-6 mt-8">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Quality: {quality}%
+              </label>
+              <input
+                type="range"
+                min="1"
+                max="100"
+                value={quality}
+                onChange={(e) => setQuality(parseInt(e.target.value))}
+                className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Higher = Better quality, larger file size
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Max Texture Size (optional)
+              </label>
+              <select
+                value={maxSize}
+                onChange={(e) => setMaxSize(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
+              >
+                <option value="">Original Size</option>
+                <option value="16">16x16 pixels</option>
+                <option value="32">32x32 pixels</option>
+                <option value="64">64x64 pixels</option>
+                <option value="128">128x128 pixels</option>
+                <option value="256">256x256 pixels</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Resize large textures to this dimension
+              </p>
+            </div>
+          </div>
+
+          {/* Error Message */}
+          {error && (
+            <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+              {error}
+            </div>
+          )}
+
+          {/* Action Button */}
           <button
             onClick={handleOptimize}
-            disabled={isProcessing || !file}
-            className={`flex items-center space-x-2 px-6 py-3 rounded-xl text-white transition-all ${
-              isProcessing || !file
-                ? 'bg-emerald-300 cursor-not-allowed'
-                : 'bg-emerald-500 hover:bg-emerald-600'
-            }`}
+            disabled={!file || isProcessing}
+            className="w-full mt-8 px-6 py-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-semibold text-lg hover:from-emerald-700 hover:to-teal-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
           >
-            <Zap className="w-5 h-5" />
-            <span>{isProcessing ? 'Optimizing...' : 'Optimize Pack'}</span>
-          </button>
-          <button onClick={resetForm} className="text-gray-600 hover:text-gray-900 transition-colors">
-            Reset
+            {isProcessing ? (
+              <span className="flex items-center justify-center">
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Optimizing...
+              </span>
+            ) : (
+              'Optimize Texture Pack'
+            )}
           </button>
         </div>
 
+        {/* Results */}
         {stats && (
-          <div className="mt-10 bg-emerald-50 border border-emerald-100 rounded-xl p-6">
-            <h2 className="text-lg font-bold text-emerald-700 mb-3 flex items-center">
-              <CheckCircle className="w-5 h-5 mr-2 text-emerald-500" />
-              Optimization Summary
-            </h2>
-            <ul className="text-gray-700 space-y-1">
-              <li>Original Size: <strong>{formatBytes(stats.originalSize)}</strong></li>
-              <li>Optimized Size: <strong>{formatBytes(stats.optimizedSize)}</strong></li>
-              <li>Files Optimized: <strong>{stats.optimizedFiles}/{stats.totalFiles}</strong></li>
-              <li>Bytes Saved: <strong>{formatBytes(stats.actualBytesSaved)}</strong></li>
-            </ul>
+          <div className="bg-white rounded-2xl shadow-xl p-8">
+            <div className="flex items-center mb-6">
+              <CheckCircle className="w-8 h-8 text-green-600 mr-3" />
+              <h2 className="text-2xl font-bold text-gray-900">
+                Optimization Complete!
+              </h2>
+            </div>
 
-            <div className="mt-5 flex flex-wrap gap-3">
-              {Object.entries(stats.fileTypes).map(([type, info]) => (
-                <div
-                  key={type}
-                  className="flex items-center bg-white border rounded-lg px-4 py-2 shadow-sm text-sm text-gray-700"
-                >
-                  {type === 'png' && <ImageIcon className="w-4 h-4 mr-2 text-emerald-500" />}
-                  {type === 'json' && <FileJson className="w-4 h-4 mr-2 text-emerald-500" />}
-                  {type === 'ogg' && <Music className="w-4 h-4 mr-2 text-emerald-500" />}
-                  {type === 'shader' && <Code className="w-4 h-4 mr-2 text-emerald-500" />}
-                  {type === 'other' && <FileArchive className="w-4 h-4 mr-2 text-emerald-500" />}
-                  <span className="capitalize">{type}</span>: {info.count}
+            {/* Main Stats */}
+            <div className="grid md:grid-cols-3 gap-6 mb-8">
+              <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-6 rounded-xl">
+                <FileArchive className="w-8 h-8 text-blue-600 mb-2" />
+                <p className="text-sm text-gray-600 mb-1">Files Processed</p>
+                <p className="text-3xl font-bold text-gray-900">
+                  {stats.optimizedFiles}/{stats.totalFiles}
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-6 rounded-xl">
+                <Download className="w-8 h-8 text-purple-600 mb-2" />
+                <p className="text-sm text-gray-600 mb-1">Size Reduced</p>
+                <p className="text-3xl font-bold text-gray-900">
+                  {stats.compressionRatio}%
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-br from-green-50 to-green-100 p-6 rounded-xl">
+                <Zap className="w-8 h-8 text-green-600 mb-2" />
+                <p className="text-sm text-gray-600 mb-1">New Size</p>
+                <p className="text-3xl font-bold text-gray-900">
+                  {formatBytes(stats.optimizedSize)}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  from {formatBytes(stats.originalSize)}
+                </p>
+              </div>
+            </div>
+
+            {/* Detailed File Type Stats */}
+            <div className="mb-8">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Optimization Details</h3>
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* PNG Stats */}
+                <div className="bg-gradient-to-br from-pink-50 to-pink-100 p-4 rounded-lg">
+                  <div className="flex items-center mb-2">
+                    <ImageIcon className="w-5 h-5 text-pink-600 mr-2" />
+                    <span className="font-semibold text-gray-900">PNG Images</span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    {stats.fileTypes.png.optimized} of {stats.fileTypes.png.count} optimized
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Saved: {formatBytes(stats.fileTypes.png.saved)}
+                  </p>
                 </div>
-              ))}
+
+                {/* JSON Stats */}
+                <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 p-4 rounded-lg">
+                  <div className="flex items-center mb-2">
+                    <FileJson className="w-5 h-5 text-yellow-600 mr-2" />
+                    <span className="font-semibold text-gray-900">JSON Files</span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    {stats.fileTypes.json.optimized} of {stats.fileTypes.json.count} optimized
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Saved: {formatBytes(stats.fileTypes.json.saved)}
+                  </p>
+                </div>
+
+                {/* OGG Stats */}
+                <div className="bg-gradient-to-br from-indigo-50 to-indigo-100 p-4 rounded-lg">
+                  <div className="flex items-center mb-2">
+                    <Music className="w-5 h-5 text-indigo-600 mr-2" />
+                    <span className="font-semibold text-gray-900">Audio (OGG)</span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    {stats.fileTypes.ogg.optimized} of {stats.fileTypes.ogg.count} optimized
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Saved: {formatBytes(stats.fileTypes.ogg.saved)}
+                  </p>
+                </div>
+
+                {/* Shader Stats */}
+                <div className="bg-gradient-to-br from-cyan-50 to-cyan-100 p-4 rounded-lg">
+                  <div className="flex items-center mb-2">
+                    <Code className="w-5 h-5 text-cyan-600 mr-2" />
+                    <span className="font-semibold text-gray-900">Shaders</span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    {stats.fileTypes.shader.optimized} of {stats.fileTypes.shader.count} optimized
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Saved: {formatBytes(stats.fileTypes.shader.saved)}
+                  </p>
+                </div>
+              </div>
+
+              {stats.fileTypes.other.count > 0 && (
+                <p className="text-sm text-gray-500 mt-4">
+                  + {stats.fileTypes.other.count} other files (no optimization needed)
+                </p>
+              )}
+            </div>
+
+            {/* Savings Summary */}
+            <div className="bg-gradient-to-r from-emerald-50 to-teal-50 p-6 rounded-xl mb-6">
+              <h4 className="font-semibold text-gray-900 mb-2">Total Savings</h4>
+              <div className="grid md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-gray-600">From file optimization:</p>
+                  <p className="text-xl font-bold text-emerald-600">
+                    {formatBytes(stats.bytesSaved)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-600">Total size reduction:</p>
+                  <p className="text-xl font-bold text-emerald-600">
+                    {formatBytes(stats.actualBytesSaved)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-4">
+              <button
+                onClick={handleDownload}
+                disabled={!downloadBlob}
+                className="flex-1 px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl font-semibold hover:from-green-700 hover:to-emerald-700 transition-all shadow-lg hover:shadow-xl disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed"
+              >
+                Download Optimized Pack
+              </button>
+              <button
+                onClick={resetForm}
+                className="px-6 py-3 bg-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-300 transition-colors"
+              >
+                New Optimization
+              </button>
             </div>
           </div>
         )}
 
-        {downloadBlob && (
-          <div className="mt-8 text-center">
-            <button
-              onClick={handleDownload}
-              className="inline-flex items-center space-x-2 bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-md transition-all"
-            >
-              <Download className="w-5 h-5" />
-              <span>Download Optimized Pack</span>
-            </button>
+        {/* Features */}
+        <div className="mt-12 grid md:grid-cols-4 gap-6 text-center">
+          <div className="bg-white/50 backdrop-blur p-6 rounded-xl">
+            <ImageIcon className="w-10 h-10 text-emerald-600 mx-auto mb-3" />
+            <h3 className="font-semibold text-gray-900 mb-2">PNG Optimize</h3>
+            <p className="text-sm text-gray-600">
+              Compress & resize images
+            </p>
           </div>
-        )}
+          <div className="bg-white/50 backdrop-blur p-6 rounded-xl">
+            <FileJson className="w-10 h-10 text-emerald-600 mx-auto mb-3" />
+            <h3 className="font-semibold text-gray-900 mb-2">JSON Minify</h3>
+            <p className="text-sm text-gray-600">
+              Remove comments & spaces
+            </p>
+          </div>
+          <div className="bg-white/50 backdrop-blur p-6 rounded-xl">
+            <Music className="w-10 h-10 text-emerald-600 mx-auto mb-3" />
+            <h3 className="font-semibold text-gray-900 mb-2">Audio Clean</h3>
+            <p className="text-sm text-gray-600">
+              Strip OGG metadata
+            </p>
+          </div>
+          <div className="bg-white/50 backdrop-blur p-6 rounded-xl">
+            <Code className="w-10 h-10 text-emerald-600 mx-auto mb-3" />
+            <h3 className="font-semibold text-gray-900 mb-2">Shader Trim</h3>
+            <p className="text-sm text-gray-600">
+              Optimize shader code
+            </p>
+          </div>
+        </div>
       </div>
     </main>
   );
