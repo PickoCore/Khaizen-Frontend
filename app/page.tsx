@@ -71,14 +71,53 @@ export default function Home() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
-      const ext = selectedFile.name.split('.').pop()?.toLowerCase();
-      const supportedFormats = ['zip', 'rar', '7z', 'tar', 'gz'];
-      
-      if (ext && supportedFormats.includes(ext)) {
-        setFile(selectedFile);
-        setError(null);
-      } else {
-        setError('Please upload a supported archive file (ZIP, RAR, 7Z, TAR, GZ)');
+      validateAndSetFile(selectedFile);
+    }
+  };
+
+  const validateAndSetFile = async (selectedFile: File) => {
+    const ext = selectedFile.name.split('.').pop()?.toLowerCase();
+    const supportedFormats = ['zip', 'rar', '7z', 'tar', 'gz'];
+    
+    if (!ext || !supportedFormats.includes(ext)) {
+      setError('Please upload a supported archive file (ZIP, RAR, 7Z, TAR, GZ)');
+      return;
+    }
+
+    // Check file size client-side
+    if (selectedFile.size === 0) {
+      setError('File is empty');
+      return;
+    }
+
+    if (selectedFile.size > 100 * 1024 * 1024) {
+      setError('File too large (max 100MB)');
+      return;
+    }
+
+    setFile(selectedFile);
+    setError(null);
+
+    // Optional: Validate with backend
+    if (ext === 'zip' || ext === 'rar' || ext === '7z') {
+      try {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        
+        const response = await fetch(`${API_URL}/validate`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+        
+        if (!result.valid) {
+          setError(`Invalid file: ${result.error}`);
+          setFile(null);
+        }
+      } catch (err) {
+        // Validation failed, but allow upload anyway
+        console.warn('File validation failed:', err);
       }
     }
   };
@@ -332,12 +371,19 @@ export default function Home() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                Optimizing...
+                Optimizing... (This may take 1-2 minutes for large files)
               </span>
             ) : (
               'Optimize Texture Pack'
             )}
           </button>
+          
+          {isProcessing && (
+            <div className="mt-4 text-center text-sm text-gray-600">
+              <p>⏳ Processing your texture pack...</p>
+              <p className="text-xs mt-1">Large files (20MB+) may take 1-2 minutes. Please wait.</p>
+            </div>
+          )}
         </div>
 
         {/* Results */}
